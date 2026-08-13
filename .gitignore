@@ -3,3 +3,5 @@
 *.pem
 *.env
 .env*
+*.class
+*.jar

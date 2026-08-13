@@ -37,3 +37,15 @@ commit → push → copy the file to the DB VM at its path below).
 ## Deploy (manual)
     scp <file> <db-vm-via-jump>:/tmp/  &&  ssh <db-vm> 'sudo install -m755 /tmp/<file> <target-path>'
     # For refresh-live-positions.sh write a temp file then install/mv — the 30s timer can catch a mid-write.
+
+
+## `queries/` — SQL (run on the DB VM against the `traccar` DB)
+Reporting, schema, migration and diagnostic SQL: `telematics_schema.sql` (telematics DDL),
+`build_trips.sql` (trip segmentation), `rollup_device_daily.sql`, `device_data_rate_report*.sql`,
+`device_state.sql` / `latest_positions.sql`, `silent_devices.sql`, `rpt_tables*.sql`,
+`telematics_migration_2026-07-19.sql`, `db_health.sql`. See `queries/README.md`.
+
+## `traccar-handlers/` — Traccar override classes (T01/T02)
+`DistanceHandler.java` — shadow of stock Traccar `DistanceHandler` that also emits a
+`groundSpeed` attribute (GPS-derived km/h). Build/deploy/rollback in `traccar-handlers/README.md`.
+Compiled `*.class`/`*.jar` are build artifacts and are gitignored — rebuild from source.
