@@ -12,7 +12,7 @@ INSERT INTO telematics.live_positions (vehicle_id, company_id, lat, lng, status,
 SELECT v.id, v.company_id, ds.lat, ds.lng,
        CASE WHEN ds.last_update < now()::timestamp - interval '24 hours' THEN 'inactive'
             WHEN COALESCE(ds.speed_kmh,0) > 0 AND ds.speed_kmh <= 250 THEN 'moving'
-            WHEN ds.ignition='true' THEN 'idle' ELSE 'stop' END,
+            WHEN ds.ignition='true' OR (ds.ignition IS NULL AND ds.battery_external_v >= 13.0) THEN 'idle' ELSE 'stop' END,
        CASE WHEN ds.last_update >= now()::timestamp - interval '24 hours' AND COALESCE(ds.speed_kmh,0) > 0 AND ds.speed_kmh <= 250 THEN ds.speed_kmh ELSE 0 END, NULL, ds.last_update, now()
 FROM telematics.vehicles v
 JOIN telematics.device_state ds ON ds.tc_device_id = v.tc_device_id
@@ -25,7 +25,7 @@ ON CONFLICT (vehicle_id) DO UPDATE SET lat=EXCLUDED.lat,lng=EXCLUDED.lng,status=
 INSERT INTO telematics.live_positions (vehicle_id, company_id, lat, lng, status, speed, heading, fixtime, updated_at)
 SELECT v.id, v.company_id, p.latitude, p.longitude,
        CASE WHEN round((p.speed*1.852)::numeric,1) > 0 AND round((p.speed*1.852)::numeric,1) <= 250 THEN 'moving'
-            WHEN (p.attrs->>'ignition')='true' THEN 'idle' ELSE 'stop' END,
+            WHEN (p.attrs->>'ignition')='true' OR ((p.attrs->>'ignition') IS NULL AND nullif(p.attrs->>'power','')::numeric >= 13.0) THEN 'idle' ELSE 'stop' END,
        CASE WHEN round((p.speed*1.852)::numeric,1) > 0 AND round((p.speed*1.852)::numeric,1) <= 250 THEN round((p.speed*1.852)::numeric,1) ELSE 0 END,
        CASE WHEN p.course >= 0 AND p.course <= 360 THEN round(p.course)::int ELSE NULL END,
        p.fixtime, now()
