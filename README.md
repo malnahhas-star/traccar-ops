@@ -10,7 +10,7 @@ commit → push → copy the file to the DB VM at its path below).
 ## `/usr/local/bin/` (root)
 | script | purpose |
 |---|---|
-| `refresh-live-positions.sh` | Rebuilds `telematics.live_positions` (the monitor map/list snapshot). Two-pass: `device_state` baseline + `tc_positions` overlay. Status is speed-driven (`moving` = speed 0–250 km/h; `idle` = parked with engine on — from ignition or external voltage ≥ 13.0 V, since ignition is often unwired; `stop` otherwise). Runs via `live-positions.service` + `.timer` (~30s); `flock` on `/run/refresh-live-positions.lock`. |
+| `refresh-live-positions.sh` | Rebuilds `telematics.live_positions` (the monitor map/list snapshot). Two-pass: `device_state` baseline + `tc_positions` overlay. Status is speed-driven (`moving` = speed 0–250 km/h; `idle` = stationary with an explicit **ignition=on** reading that is **fresh** (< 6 min old); `stop` otherwise). The old battery-voltage engine-on proxy was dropped — a charged battery reads ~14 V with the engine off, so it fabricated `idle` for parked vehicles; and a device that went silent on a transient ignition blip now ages back to `stop` instead of latching `idle`. Runs via `live-positions.service` + `.timer` (~30s); `flock` on `/run/refresh-live-positions.lock`. |
 
 ## `home-ubuntu/` → `~ubuntu/` on the DB VM
 | script | purpose |
