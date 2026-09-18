@@ -107,10 +107,61 @@ ssh T01 'sudo cp \
 - Adopting a new Traccar release: `git fetch upstream`, merge the upstream tag into a
   branch off `cvx/production`, rebuild, re-test, then fast-forward `cvx/production`.
 
+## Deployment source-of-truth (CI/CD)
+
+Override classes are **never hand-maintained**. They are produced by CI in the private
+fork (`malnahhas-star/traccar`) and only then staged to nodes:
+
+```text
+Git tag (v*-cvx.*)
+  ↓
+GitHub Actions  (.github/workflows/override-bundle.yml)
+  ↓
+tested build    (./gradlew compileJava checkstyleMain test)   ← JDK 17.0.20 (see below)
+  ↓
+versioned override artifact   (traccar-overrides-<version>.tar.gz)
+  ↓
+SHA256 verification           (scripts/known-good/<version>.sha256; build fails on mismatch)
+  ↓
+staged deployment             (operator step — NOT done by CI)
+```
+
+- Pipeline lives in the fork: workflow `.github/workflows/override-bundle.yml`,
+  builder `scripts/build-override-bundle.sh` (same script runs locally and in CI).
+- Triggers: PRs targeting `cvx/production`, pushes to `cvx/production`, and tags
+  matching `v*-cvx.*`. Tag builds also publish a GitHub Release with the `.tar.gz`
+  + `SHA256SUMS` (using the built-in `GITHUB_TOKEN`).
+- Bundle contents: `org/traccar/session/cache/CacheManager.class`,
+  `org/traccar/helper/model/PositionUtil.class`, `SHA256SUMS`, `SOURCE_COMMIT`,
+  `VERSION`, `TRACCAR_VERSION`, `BUILD_INFO.txt`.
+- **Known-good gate:** each release version pins its expected class hashes in
+  `scripts/known-good/<version>.sha256`. `v6.13.3-cvx.1` pins the currently deployed
+  `eb63e16f…` / `b757f7be…`; the build fails if it does not reproduce them.
+
+### Build JDK — must be 17.0.20 (not 21)
+
+The deployed override classes are **Java 17 bytecode (major 61)**, compiled with
+**JDK 17.0.20** (`build.gradle` sets source/target = 17). The tracker nodes run
+Java 21 at *runtime*, which loads Java-17 classes fine — but to reproduce the exact
+`eb63e16f…` / `b757f7be…` bytes the build MUST use JDK 17.0.20. CI pins Temurin
+17.0.20 for this reason. Moving the build to Java 21 would change the hashes and
+would require re-baselining `scripts/known-good/` and re-deploying the new classes.
+
+### Deploying a CI-produced bundle (manual, when authorized)
+
+```bash
+# On the ops box, per node (example T0x), from a downloaded/verified bundle:
+tar xzf traccar-overrides-<version>.tar.gz
+( cd traccar-overrides && sha256sum -c SHA256SUMS )   # must pass
+scp traccar-overrides/org/traccar/session/cache/CacheManager.class  T0x:/tmp/
+scp traccar-overrides/org/traccar/helper/model/PositionUtil.class   T0x:/tmp/
+# then place under /opt/traccar/override/... (both together) + restart traccar.
+```
+
 ## Follow-ups (longer term)
 
-- Build deployments from this canonical source/commit (CI producing the override
-  bundle) instead of hand-maintained `.class` files.
+- CI produces the bundle; wire a **separate, gated** deploy step (still one node at a
+  time, health-checked) so nodes pull the verified artifact instead of manual scp.
 - Migrate the remaining custom override source (`traccar-handlers/DistanceHandler.java`)
   into the private fork so ALL Java lives in one source repo; keep only its build/deploy
-  metadata here.
+  metadata here, and add it to the override bundle.
