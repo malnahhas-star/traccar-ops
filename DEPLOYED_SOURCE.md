@@ -3,7 +3,7 @@
 This repo (**TraccarOps**) holds **deployment/operations only**. The authoritative
 Traccar **application source** lives in our private fork:
 
-- Private fork (canonical source): `git@github-traccar:<owner>/<repo>.git`  → git remote `origin`
+- Private fork (canonical source): `git@github-traccar:malnahhas-star/traccar.git`  → git remote `origin`
 - Public upstream (fetch/merge future releases only, never our deploy source): `github.com/traccar/traccar` → git remote `upstream`
 - Local working copy on ops box: `/home/ubuntu/Development/Projects/Traccar`
 
@@ -58,7 +58,7 @@ T08 = admin console, not a tracker.
 ## Build the deployed classes from source
 
 ```bash
-git clone git@github-traccar:<owner>/<repo>.git traccar && cd traccar
+git clone git@github-traccar:malnahhas-star/traccar.git traccar && cd traccar
 git checkout v6.13.3-cvx.1          # == commit dc48939
 ./gradlew --no-daemon clean compileJava jar
 # extract + verify the two override classes:
