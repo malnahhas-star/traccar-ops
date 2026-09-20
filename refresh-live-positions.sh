@@ -6,17 +6,12 @@ CUT=$(date -u -d '90 minutes ago' '+%Y-%m-%d %H:%M:%S')
 sudo -u postgres psql -d traccar -q -v ON_ERROR_STOP=1 <<SQL
 SET statement_timeout='50s';
 -- PASS A (baseline): last-known position of EVERY vehicle from device_state (fast,
--- one indexed row per device). Full status incl. 'inactive' (>24h). No heading.
+-- one indexed row per device). Full 5-status incl. 'inactive' (>24h). No heading.
 -- This is why offline/inactive vehicles now appear on the map at their last spot.
 INSERT INTO telematics.live_positions (vehicle_id, company_id, lat, lng, status, speed, heading, fixtime, updated_at)
 SELECT v.id, v.company_id, ds.lat, ds.lng,
        CASE WHEN ds.last_update < now()::timestamp - interval '24 hours' THEN 'inactive'
-            -- towing = the vehicle is MOVING with the engine OFF (ignition explicitly
-            -- false). Must be tested before 'moving' and require ignition IS FALSE so
-            -- that unwired/NULL-ignition devices stay 'moving', not false-towing.
-            WHEN COALESCE(ds.speed_kmh,0) > 0 AND ds.speed_kmh <= 250 AND ds.last_update < now()::timestamp - interval '15 minutes' THEN 'offline'
-            WHEN COALESCE(ds.speed_kmh,0) > 0 AND ds.speed_kmh <= 250 AND ds.ignition IS FALSE THEN 'towing'
-            WHEN COALESCE(ds.speed_kmh,0) > 0 AND ds.speed_kmh <= 250 AND ds.ignition IS NOT FALSE THEN 'moving'
+            WHEN COALESCE(ds.speed_kmh,0) > 0 AND ds.speed_kmh <= 250 THEN 'moving'
             -- idle = engine genuinely on RIGHT NOW. Require an explicit ignition=on
             -- reading AND a fresh fix (a device that went silent on a transient
             -- ignition blip must age back to 'stop', not latch idle forever). The old
@@ -31,12 +26,10 @@ WHERE v.deleted_at IS NULL AND ds.lat IS NOT NULL AND ds.lng IS NOT NULL
 ON CONFLICT (vehicle_id) DO UPDATE SET lat=EXCLUDED.lat,lng=EXCLUDED.lng,status=EXCLUDED.status,
   speed=EXCLUDED.speed,heading=EXCLUDED.heading,fixtime=EXCLUDED.fixtime,updated_at=now(),company_id=EXCLUDED.company_id;
 -- PASS B (refine): recently-active vehicles (last 90 min) get freshest position +
--- HEADING from tc_positions, overwriting the device_state baseline.
+-- HEADING from tc_positions, overwriting the device_state baseline. moving/idle/stop.
 INSERT INTO telematics.live_positions (vehicle_id, company_id, lat, lng, status, speed, heading, fixtime, updated_at)
 SELECT v.id, v.company_id, p.latitude, p.longitude,
-       CASE WHEN round((p.speed*1.852)::numeric,1) > 0 AND round((p.speed*1.852)::numeric,1) <= 250 AND p.fixtime < now()::timestamp - interval '15 minutes' THEN 'offline'
-            WHEN round((p.speed*1.852)::numeric,1) > 0 AND round((p.speed*1.852)::numeric,1) <= 250 AND (p.attrs->>'ignition')='false' THEN 'towing'
-            WHEN round((p.speed*1.852)::numeric,1) > 0 AND round((p.speed*1.852)::numeric,1) <= 250 AND COALESCE(p.attrs->>'motion','') <> 'false' AND COALESCE(p.attrs->>'ignition','') <> 'false' THEN 'moving'
+       CASE WHEN round((p.speed*1.852)::numeric,1) > 0 AND round((p.speed*1.852)::numeric,1) <= 250 THEN 'moving'
             -- idle only on an explicit, fresh ignition=on (see PASS A). Voltage
             -- fallback removed: it turned parked vehicles into false 'idle'.
             WHEN (p.attrs->>'ignition')='true' AND p.fixtime >= now()::timestamp - interval '6 minutes' THEN 'idle' ELSE 'stop' END,
@@ -50,27 +43,6 @@ JOIN LATERAL (SELECT tp.fixtime,tp.latitude,tp.longitude,tp.speed,tp.course,
               FROM tc_positions tp WHERE tp.deviceid=d.id AND tp.fixtime > TIMESTAMP '$CUT'
               ORDER BY tp.fixtime DESC LIMIT 1) p ON true
 WHERE v.deleted_at IS NULL AND p.latitude BETWEEN -90 AND 90 AND p.longitude BETWEEN -180 AND 180
-ON CONFLICT (vehicle_id) DO UPDATE SET lat=EXCLUDED.lat,lng=EXCLUDED.lng,status=EXCLUDED.status,
-  speed=EXCLUDED.speed,heading=EXCLUDED.heading,fixtime=EXCLUDED.fixtime,updated_at=now(),company_id=EXCLUDED.company_id;
--- PASS C (FAILOVER): for a PRIMARY vehicle that HAS backup tracker(s), if its own
--- last position is stale (> 10 min) override it with the freshest LIVE backup
--- position, so the map falls over to a backup while the primary is silent and
--- switches back when the primary reports again. JOIN LATERAL + EXISTS gate => this
--- only ever touches vehicles that actually have a backup (inert for the fleet).
-INSERT INTO telematics.live_positions (vehicle_id, company_id, lat, lng, status, speed, heading, fixtime, updated_at)
-SELECT prim.id, prim.company_id, b.lat, b.lng, b.status, b.speed, b.heading, b.fixtime, now()
-FROM telematics.vehicles prim
-LEFT JOIN telematics.live_positions pl ON pl.vehicle_id = prim.id
-JOIN LATERAL (
-   SELECT bl.lat, bl.lng, bl.status, bl.speed, bl.heading, bl.fixtime
-   FROM telematics.vehicles bkp
-   JOIN telematics.live_positions bl ON bl.vehicle_id = bkp.id
-   WHERE bkp.backup_of_vehicle_id = prim.id AND bkp.deleted_at IS NULL
-   ORDER BY bl.fixtime DESC LIMIT 1
-) b ON true
-WHERE prim.deleted_at IS NULL
-  AND (pl.fixtime IS NULL OR pl.fixtime < now()::timestamp - interval '10 minutes')
-  AND b.fixtime > COALESCE(pl.fixtime, TIMESTAMP 'epoch')
 ON CONFLICT (vehicle_id) DO UPDATE SET lat=EXCLUDED.lat,lng=EXCLUDED.lng,status=EXCLUDED.status,
   speed=EXCLUDED.speed,heading=EXCLUDED.heading,fixtime=EXCLUDED.fixtime,updated_at=now(),company_id=EXCLUDED.company_id;
 DELETE FROM telematics.live_positions WHERE updated_at < now() - interval '15 minutes';
