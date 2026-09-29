@@ -13,6 +13,7 @@ CREATE TABLE IF NOT EXISTS telematics.device_state (
     ignition           boolean,
     satellites         integer,
     battery_external_v numeric,
+    battery_internal_v numeric,
     odometer_km        numeric,
     address            text,
     refreshed_at       timestamptz DEFAULT now()
@@ -33,7 +34,7 @@ DECLARE n int;
 BEGIN
     INSERT INTO telematics.device_state AS ds
         (tc_device_id, last_update, lat, lng, speed_kmh, ignition, satellites,
-         battery_external_v, odometer_km, address, refreshed_at)
+         battery_external_v, battery_internal_v, odometer_km, address, refreshed_at)
     SELECT DISTINCT ON (p.deviceid)
            p.deviceid,
            (p.fixtime AT TIME ZONE 'UTC'),
@@ -44,6 +45,7 @@ BEGIN
                 ELSE NULL END,
            nullif(a.attrs ->> 'sat', '')::int,
            nullif(a.attrs ->> 'power', '')::numeric,
+           nullif(a.attrs ->> 'battery', '')::numeric,
            (nullif(a.attrs ->> 'odometer', '')::numeric) / 1000,
            p.address, now()
     FROM tc_positions p
@@ -55,6 +57,7 @@ BEGIN
         last_update = EXCLUDED.last_update, lat = EXCLUDED.lat, lng = EXCLUDED.lng,
         speed_kmh = EXCLUDED.speed_kmh, ignition = EXCLUDED.ignition,
         satellites = EXCLUDED.satellites, battery_external_v = EXCLUDED.battery_external_v,
+        battery_internal_v = EXCLUDED.battery_internal_v,
         odometer_km = EXCLUDED.odometer_km, address = EXCLUDED.address, refreshed_at = now()
     WHERE EXCLUDED.last_update >= ds.last_update;
     GET DIAGNOSTICS n = ROW_COUNT;
