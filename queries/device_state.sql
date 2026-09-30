@@ -16,6 +16,7 @@ CREATE TABLE IF NOT EXISTS telematics.device_state (
     battery_internal_v numeric,
     odometer_km        numeric,
     address            text,
+    attributes         jsonb,
     refreshed_at       timestamptz DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS device_state_last_update_idx ON telematics.device_state (last_update);
@@ -34,7 +35,7 @@ DECLARE n int;
 BEGIN
     INSERT INTO telematics.device_state AS ds
         (tc_device_id, last_update, lat, lng, speed_kmh, ignition, satellites,
-         battery_external_v, battery_internal_v, odometer_km, address, refreshed_at)
+         battery_external_v, battery_internal_v, odometer_km, address, attributes, refreshed_at)
     SELECT DISTINCT ON (p.deviceid)
            p.deviceid,
            (p.fixtime AT TIME ZONE 'UTC'),
@@ -47,7 +48,7 @@ BEGIN
            nullif(a.attrs ->> 'power', '')::numeric,
            nullif(a.attrs ->> 'battery', '')::numeric,
            (nullif(a.attrs ->> 'odometer', '')::numeric) / 1000,
-           p.address, now()
+           p.address, a.attrs, now()
     FROM tc_positions p
     CROSS JOIN LATERAL (
         SELECT replace(p.attributes::text, '\u0000', '')::jsonb AS attrs OFFSET 0) a
@@ -58,7 +59,8 @@ BEGIN
         speed_kmh = EXCLUDED.speed_kmh, ignition = EXCLUDED.ignition,
         satellites = EXCLUDED.satellites, battery_external_v = EXCLUDED.battery_external_v,
         battery_internal_v = EXCLUDED.battery_internal_v,
-        odometer_km = EXCLUDED.odometer_km, address = EXCLUDED.address, refreshed_at = now()
+        odometer_km = EXCLUDED.odometer_km, address = EXCLUDED.address,
+        attributes = EXCLUDED.attributes, refreshed_at = now()
     WHERE EXCLUDED.last_update >= ds.last_update;
     GET DIAGNOSTICS n = ROW_COUNT;
     RETURN n;
